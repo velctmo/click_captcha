@@ -4,6 +4,9 @@ English | [简体中文](#点选验证码系统)
 
 A click-based CAPTCHA generation and verification system implemented with FastAPI. The system generates CAPTCHA images with random Chinese characters, requiring users to click on specific characters as indicated in the prompt.
 
+![image](https://github.com/user-attachments/assets/735bfa85-73e3-4f2d-b2c2-1b3006c4ab9a)
+
+
 ## 📋 Table of Contents
 
 - [Features](#features)
@@ -121,6 +124,9 @@ Compared to file storage, using Redis to store base64 encoded image data has the
 [English](#click-captcha-system) | 简体中文
 
 基于 FastAPI 实现的点选验证码生成和验证系统。该系统可以生成包含随机中文字符的验证码图片，用户需要按照提示点击特定字符来完成验证。
+
+![image](https://github.com/user-attachments/assets/6971a7cc-8bad-48ae-b279-293a685a2a94)
+
 
 ## 📋 目录
 
