@@ -1,4 +1,4 @@
-# Click Captcha System | 点选验证码系统
+# 点选验证码系统
 
 <div align="center">
 
@@ -68,11 +68,6 @@ poetry install
 - `IMAGES_DIR`: 背景图片目录路径（默认: `click_captcha/static/images`）
 - `FONTS_DIR`: 字体文件目录路径（默认: `click_captcha/static/fonts`）
 - `ENVIRONMENT`: 运行环境（默认: `development`）
-
-### 配置参数
-
-在 `click_captcha/core/config.py` 文件中可以配置:
-
 - `CAPTCHA_WIDTH`: 验证码图片宽度（默认：400）
 - `CAPTCHA_HEIGHT`: 验证码图片高度（默认：200）
 - `CAPTCHA_EXPIRATION_SECONDS`: 验证码过期时间（秒，默认：120）
@@ -184,11 +179,6 @@ The following parameters can be configured through environment variables or in a
 - `IMAGES_DIR`: Background images directory path (default: `click_captcha/static/images`)
 - `FONTS_DIR`: Font files directory path (default: `click_captcha/static/fonts`)
 - `ENVIRONMENT`: Runtime environment (default: `development`)
-
-### Configuration Parameters
-
-In the `click_captcha/core/config.py` file, you can configure:
-
 - `CAPTCHA_WIDTH`: CAPTCHA image width (default: 400)
 - `CAPTCHA_HEIGHT`: CAPTCHA image height (default: 200)
 - `CAPTCHA_EXPIRATION_SECONDS`: CAPTCHA expiration time (seconds, default: 120)
