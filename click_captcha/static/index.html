@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中文文字点选验证码</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            width: 400px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+        .captcha-container {
+            position: relative;
+            margin: 0 auto 20px;
+            width: 300px;
+            height: 200px;
+        }
+        .captcha-img {
+            width: 100%;
+            height: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: crosshair;
+            user-select: none;
+        }
+        .prompt {
+            margin: 15px 0;
+            padding: 12px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            color: #333;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 15px;
+            transition: background-color 0.3s;
+        }
+        .refresh-btn {
+            background-color: #f0f0f0;
+            color: #555;
+            width: 30%;
+        }
+        .refresh-btn:hover {
+            background-color: #e0e0e0;
+        }
+        .submit-btn {
+            background-color: #4CAF50;
+            color: white;
+            width: 65%;
+        }
+        .submit-btn:hover {
+            background-color: #3e8e41;
+        }
+        .submit-btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 4px;
+            display: none;
+            font-weight: bold;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+        .click-marker {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .click-sequence {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        .click-count {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background-color: #4CAF50;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .click-count.active {
+            background-color: #ff5722;
+            transform: scale(1.1);
+        }
+        .click-count.completed {
+            background-color: #3e8e41;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>中文汉字点选验证</h1>
+
+        <div class="captcha-container">
+            <img id="captchaImage" class="captcha-img" src="" alt="验证码" draggable="false">
+            <!-- 点击标记会在这里动态生成 -->
+        </div>
+
+        <div class="prompt" id="promptText">加载中...</div>
+
+        <div class="click-sequence" id="clickSequenceContainer">
+            <!-- 点击序列指示器会在这里动态生成 -->
+        </div>
+
+        <div class="controls">
+            <button type="button" id="refreshBtn" class="refresh-btn">刷新</button>
+            <button type="button" id="submitBtn" class="submit-btn" disabled>验证</button>
+        </div>
+
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        // 页面加载时获取验证码
+        document.addEventListener('DOMContentLoaded', getCaptcha);
+
+        // 当前验证码ID和点击坐标
+        let currentCaptchaId = '';
+        let targetCount = 0;
+        let clickSequence = [];
+        let originalImageWidth = 400; // 验证码生成时的原始宽度，会被后端返回的值覆盖
+        let originalImageHeight = 200; // 验证码生成时的原始高度，会被后端返回的值覆盖
+
+        // 获取DOM元素
+        const captchaImage = document.getElementById('captchaImage');
+        const promptText = document.getElementById('promptText');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const submitBtn = document.getElementById('submitBtn');
+        const resultDiv = document.getElementById('result');
+        const clickSequenceContainer = document.getElementById('clickSequenceContainer');
+
+        // 事件监听
+        refreshBtn.addEventListener('click', getCaptcha);
+        submitBtn.addEventListener('click', verifyClickSequence);
+
+        // 图片点击事件
+        captchaImage.addEventListener('click', function(e) {
+            // 如果已经点击完所有目标，不再记录点击
+            if (clickSequence.length >= targetCount) {
+                return;
+            }
+
+            // 获取点击坐标（相对于图片）
+            const rect = captchaImage.getBoundingClientRect();
+
+            // 计算点击位置相对于图片的百分比
+            const percentX = (e.clientX - rect.left) / rect.width;
+            const percentY = (e.clientY - rect.top) / rect.height;
+
+            // 转换为原始图片上的坐标
+            const clickX = Math.round(percentX * originalImageWidth);
+            const clickY = Math.round(percentY * originalImageHeight);
+
+            // 计算标记位置（相对于当前图片尺寸）
+            const markerX = percentX * rect.width;
+            const markerY = percentY * rect.height;
+
+            // 添加点击标记
+            const clickMarker = document.createElement('div');
+            clickMarker.className = 'click-marker';
+            clickMarker.style.left = markerX + 'px';
+            clickMarker.style.top = markerY + 'px';
+            clickMarker.style.backgroundColor = `rgba(255, 0, 0, ${0.5 + 0.1 * clickSequence.length})`;
+            clickMarker.style.border = `2px solid rgba(255, 0, 0, ${0.7 + 0.1 * clickSequence.length})`;
+
+            // 显示点击序号
+            clickMarker.textContent = (clickSequence.length + 1).toString();
+            clickMarker.style.color = 'white';
+            clickMarker.style.fontWeight = 'bold';
+            clickMarker.style.fontSize = '16px';
+            clickMarker.style.lineHeight = '24px';
+            clickMarker.style.textAlign = 'center';
+
+            // 添加到容器
+            document.querySelector('.captcha-container').appendChild(clickMarker);
+
+            // 记录点击坐标
+            clickSequence.push({
+                x: clickX,
+                y: clickY
+            });
+
+            // 更新点击序列指示器
+            updateClickSequenceIndicator();
+
+            // 如果已点击所有目标，启用提交按钮
+            if (clickSequence.length === targetCount) {
+                submitBtn.disabled = false;
+            }
+        });
+
+        // 更新点击序列指示器
+        function updateClickSequenceIndicator() {
+            // 清空容器
+            clickSequenceContainer.innerHTML = '';
+
+            // 创建指示器
+            for (let i = 0; i < targetCount; i++) {
+                const indicator = document.createElement('div');
+                indicator.className = 'click-count';
+
+                if (i < clickSequence.length) {
+                    indicator.className += ' completed';
+                } else if (i === clickSequence.length) {
+                    indicator.className += ' active';
+                }
+
+                indicator.textContent = (i + 1).toString();
+                clickSequenceContainer.appendChild(indicator);
+            }
+        }
+
+        // 获取验证码
+        function getCaptcha() {
+            fetch('/api/captcha')
+                .then(response => response.json())
+                .then(data => {
+                    // 存储验证码ID和目标数量
+                    currentCaptchaId = data.captcha_id;
+                    targetCount = data.target_count;
+
+                    // 更新原始图片尺寸（从服务器获取）
+                    originalImageWidth = data.image_width || 400;
+                    originalImageHeight = data.image_height || 200;
+
+                    console.log(`Captcha image size: ${originalImageWidth}x${originalImageHeight}`);
+
+                    // 设置图片和提示
+                    captchaImage.src = data.image_data;
+                    promptText.textContent = data.prompt;
+
+                    // 重置点击状态
+                    clickSequence = [];
+                    submitBtn.disabled = true;
+
+                    // 清除所有点击标记
+                    const markers = document.querySelectorAll('.click-marker');
+                    markers.forEach(marker => marker.remove());
+
+                    // 更新点击序列指示器
+                    updateClickSequenceIndicator();
+
+                    // 隐藏结果
+                    hideResult();
+                })
+                .catch(error => {
+                    console.error('Failed to get captcha:', error);
+                    showResult('Failed to get captcha, please refresh the page', false);
+                });
+        }
+
+        // 验证点击序列
+        function verifyClickSequence() {
+            // 如果未点击完所有目标，不执行验证
+            if (clickSequence.length < targetCount) {
+                return;
+            }
+
+            // 创建请求数据
+            const data = {
+                captcha_id: currentCaptchaId,
+                clicks: clickSequence
+            };
+
+            fetch('/api/captcha/verify', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showResult(data.message, true);
+                } else {
+                    showResult(data.message, false);
+                    // 验证失败时自动刷新验证码
+                    setTimeout(getCaptcha, 1500);
+                }
+            })
+            .catch(error => {
+                console.error('验证失败:', error);
+                showResult('请求失败，请重试', false);
+                setTimeout(getCaptcha, 1500);
+            });
+        }
+
+        // 显示结果
+        function showResult(message, isSuccess) {
+            resultDiv.textContent = message;
+            resultDiv.className = isSuccess ? 'result success' : 'result error';
+            resultDiv.style.display = 'block';
+        }
+
+        // 隐藏结果
+        function hideResult() {
+            resultDiv.style.display = 'none';
+        }
+    </script>
+</body>
+</html>

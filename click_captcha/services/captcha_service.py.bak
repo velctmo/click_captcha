@@ -1,0 +1,385 @@
+import base64
+import logging
+import os
+import random
+import uuid
+from typing import Dict, List, Optional, Tuple
+
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+from click_captcha.core.config import settings
+from click_captcha.core.redis import RedisManager
+from click_captcha.models.captcha import Captcha, CaptchaTarget
+
+
+logger = logging.getLogger(__name__)
+COMMON_CHINESE_CHARS = (
+    """
+        喝同湿冰是鸡果九蒸父菜买饱咸年里兴牛二千百班原口演站孩证筷帽听块学流小家霜亮六老险地有他纸道码累活
+        土司卖安我雷渴蔬爱就因花西七木沙右为高假唱阴钱车痛半坐虾秒工衣奶跳心后病结字近饭看干址乐人前多发味
+        一女漠黑来束猪闲苹斤北米友危朋草白肉泥男阳好树三明幼笑鸭和她大鼻海舒云时让鞋忙脑饿林甜喜头条护辣每
+        外机十动五面能公了蛋快画厨不锅送星说师等春少经写碗煎万笔晴森今酸空勺冬耳要火夏生猫密这以元走洋光角
+        零错名欢找眼医视康风会天运炒过日鸟你煮羊舞红歌警理士雪农板书母昨龄杯太份对雨啡分上跑停包真记热水气
+        附绿山民狗月习健咖们收服烤酒四难号中哭石东旁始电香钟读南蕉察手者身它死的作拿放盘爬期帮边试开烧苦黄
+        河全鱼考冷炸加子在助员八秋做左叉雾吃间躺骑蓝茶
+    """
+)
+
+
+class CaptchaService:
+    """Captcha service responsible for generating and verifying click captchas."""
+
+    @classmethod
+    def get_random_base_image(cls) -> np.ndarray:
+        """
+        Get a random background image.
+
+        Returns:
+            np.ndarray: OpenCV image array of the selected background
+        """
+        # check background directory
+        if settings.IMAGES_DIR and os.path.exists(settings.IMAGES_DIR):
+            background_files = [
+                f for f in os.listdir(settings.IMAGES_DIR) if f.lower().endswith((".png", ".jpg", ".jpeg"))
+            ]
+
+            if background_files:
+                image_path = os.path.join(settings.IMAGES_DIR, random.choice(background_files))
+                return cv2.imread(image_path)
+
+        # If no backgrounds or directory is empty, use default background
+        default_img = np.ones((settings.CAPTCHA_HEIGHT, settings.CAPTCHA_WIDTH, 3), dtype=np.uint8) * 255
+        return default_img
+
+    @classmethod
+    def get_font_path(cls) -> str:
+        """
+        Get font file path.
+
+        Returns:
+            str: Path to a suitable font file
+
+        Raises:
+            FileNotFoundError: If no suitable font can be found
+        """
+
+        # Check if font files exist in font directory
+        if os.path.exists(settings.FONTS_DIR):
+            font_files = [f for f in os.listdir(settings.FONTS_DIR) if f.lower().endswith((".ttf", ".otf"))]
+            if font_files:
+                return os.path.join(settings.FONTS_DIR, random.choice(font_files))
+
+        logger.info("No font files found in font directory, trying system fonts")
+
+        # Different system default font paths
+        system_fonts = [
+            # macOS
+            "/System/Library/Fonts/PingFang.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+            # Windows
+            "C:\\Windows\\Fonts\\simhei.ttf",
+            "C:\\Windows\\Fonts\\msyh.ttf",
+            "C:\\Windows\\Fonts\\simsun.ttc",
+            # Linux
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            # 自定义字体位置
+            "simhei.ttf",
+            "fonts/simhei.ttf",
+        ]
+
+        # Try to find and use system fonts
+        for font_path in system_fonts:
+            if os.path.exists(font_path):
+                try:
+                    # check if the font is available
+                    ImageFont.truetype(font_path, settings.BASE_FONT_SIZE)
+                    return font_path
+                except Exception:
+                    continue
+
+        # If we absolutely can't find a suitable font, raise error
+        error_msg = "No Chinese font file found. Please add a Chinese font file to app/static/fonts directory"
+        logger.critical(error_msg)
+        raise FileNotFoundError(error_msg)
+
+    @classmethod
+    def get_unique_chars(cls, count) -> List[str]:
+        """Generate random unique chars"""
+        chars = set()
+        while len(chars) < count:
+            chars.add(random.choice(COMMON_CHINESE_CHARS))
+        return list(chars)
+
+    @classmethod
+    def get_random_target_objects(cls) -> Tuple[List[CaptchaTarget], str]:
+        """
+        Generate random target objects.
+
+        Returns:
+            Tuple[List[CaptchaTarget], str]: List of target objects and prompt
+        """
+
+        # Randomly select characters to click
+        num_targets = random.randint(3, settings.TARGET_OBJECTS_COUNT)
+        target_chars = cls.get_unique_chars(num_targets)
+
+        # add extra 1-2 characters
+        num_extra_chars = random.randint(1, 2)
+        # keep extra characters unique
+        extra_chars = []
+        while len(extra_chars) < num_extra_chars:
+            new_char = random.choice(COMMON_CHINESE_CHARS)
+            if new_char not in target_chars and new_char not in extra_chars:
+                extra_chars.append(new_char)
+
+        # Create prompt
+        prompt = "请依次点击: {}".format("、".join(target_chars))
+
+        # Generate target objects
+        targets = []
+        for char in target_chars:
+            # Generate random position
+            x = random.randint(50, settings.CAPTCHA_WIDTH - 50)
+            y = random.randint(50, settings.CAPTCHA_HEIGHT - 50)
+
+            # Generate random font size
+            font_size = random.randint(settings.MIN_FONT_SIZE, settings.MAX_FONT_SIZE)
+
+            # Generate random rotation angle
+            rotation = random.randint(-settings.MAX_ROTATION_ANGLE, settings.MAX_ROTATION_ANGLE)
+
+            # Estimate width and height based on font size
+            width = font_size
+            height = font_size
+
+            targets.append(
+                CaptchaTarget(
+                    name=char,
+                    x=x,
+                    y=y,
+                    width=width,
+                    height=height,
+                    font_size=font_size,
+                    rotation=rotation,
+                )
+            )
+
+        return targets, prompt
+
+    @classmethod
+    def image_to_base64(cls, image: np.ndarray) -> str:
+        """
+        Convert OpenCV image to base64 encoded string.
+
+        Args:
+            image: OpenCV image array
+
+        Returns:
+            str: Base64 encoded image string (data URI format)
+        """
+        # Convert BGR to RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Encode image to PNG
+        _, buffer = cv2.imencode(".png", image_rgb)
+
+        # Convert to base64 - convert buffer to bytes first
+        img_str = base64.b64encode(buffer.tobytes()).decode()
+        return f"data:image/png;base64,{img_str}"
+
+    @classmethod
+    def draw_rotated_text(
+        cls,
+        img: np.ndarray,
+        text: str,
+        x: int,
+        y: int,
+        font_size: int,
+        rotation: int,
+        font_path: str,
+    ) -> Tuple[np.ndarray, int, int]:
+        """
+        Draw rotated text on image
+
+        Args:
+            img: Target image
+            text: Text to draw
+            x: X coordinate
+            y: Y coordinate
+            font_size: Font size
+            rotation: Rotation angle
+            font_path: Font file path
+
+        Returns:
+            Tuple[np.ndarray, int, int]: Image with text, text width, text height
+        """
+        # Convert OpenCV image to PIL
+        img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+        # Create font object
+        font = ImageFont.truetype(font_path, font_size)
+
+        # Create temporary draw object to calculate text size
+        temp_draw = ImageDraw.Draw(img_pil)
+
+        # Use textbbox instead of textsize (which is deprecated in newer Pillow versions)
+        try:
+            # For newer Pillow versions
+            left, top, right, bottom = temp_draw.textbbox((0, 0), text, font=font)
+            text_width = right - left
+            text_height = bottom - top
+        except AttributeError:
+            # Fallback for older Pillow versions
+            text_width, text_height = temp_draw.textsize(text, font=font)  # type: ignore
+
+        # Create new transparent layer for rotating text
+        txt_img = Image.new("RGBA", (text_width * 2, text_height * 2), (255, 255, 255, 0))
+        txt_draw = ImageDraw.Draw(txt_img)
+
+        # Draw text in center position
+        txt_draw.text((text_width // 2, text_height // 2), text, font=font, fill=(0, 0, 0, 255))
+
+        # Rotate text layer
+        rotated_txt = txt_img.rotate(rotation, expand=True)
+
+        # Convert rotated PIL image to OpenCV format
+        rotated_np = np.array(rotated_txt)
+
+        # Handle alpha channel
+        if rotated_np.shape[2] == 4:
+            # Create mask from alpha channel
+            alpha = rotated_np[:, :, 3] / 255.0
+            alpha = np.dstack([alpha, alpha, alpha])
+
+            # Extract RGB
+            foreground = rotated_np[:, :, :3]
+
+            # Calculate paste position
+            paste_x = max(0, x - rotated_txt.width // 2)
+            paste_y = max(0, y - rotated_txt.height // 2)
+
+            # Define region of interest
+            roi_width = min(rotated_np.shape[1], img.shape[1] - paste_x)
+            roi_height = min(rotated_np.shape[0], img.shape[0] - paste_y)
+
+            if roi_width > 0 and roi_height > 0:
+                # Get region of interest
+                roi = img[paste_y : paste_y + roi_height, paste_x : paste_x + roi_width]  # noqa
+
+                # Crop foreground and alpha if needed
+                fg_cropped = foreground[:roi_height, :roi_width]
+                alpha_cropped = alpha[:roi_height, :roi_width]
+
+                # Blend images
+                blended = cv2.convertScaleAbs(roi * (1 - alpha_cropped) + fg_cropped * alpha_cropped)
+
+                # Put blended region back into original image
+                img[paste_y : paste_y + roi_height, paste_x : paste_x + roi_width] = blended
+
+        return img, rotated_txt.width, rotated_txt.height
+
+    @classmethod
+    async def new(cls) -> Captcha:
+        """
+        生成新的验证码
+
+        返回:
+            Captcha: 生成的验证码对象
+        """
+        # 获取随机背景图
+        base_image = cls.get_random_base_image()
+
+        # 调整背景图大小
+        base_image = cv2.resize(base_image, (settings.CAPTCHA_WIDTH, settings.CAPTCHA_HEIGHT))
+
+        # 获取随机目标对象
+        targets, prompt = cls.get_random_target_objects()
+
+        # 获取字体
+        font_path = cls.get_font_path()
+
+        # 在图像上绘制字符
+        for target in targets:
+            # 绘制旋转文字
+            base_image, text_width, text_height = cls.draw_rotated_text(
+                base_image,
+                target.name,
+                target.x,
+                target.y,
+                target.font_size,
+                target.rotation,
+                font_path,
+            )
+
+            # 更新目标的宽度和高度
+            target.width = text_width
+            target.height = text_height
+
+        # 将图像转换为base64
+        image_data = cls.image_to_base64(base_image)
+
+        # 创建验证码对象
+        captcha_id = str(uuid.uuid4())
+        captcha = Captcha(image_data, targets, prompt, captcha_id)
+
+        # 将验证码存储到Redis
+        await RedisManager.set(captcha_id, captcha.to_dict(), ttl=settings.CAPTCHA_EXPIRATION_SECONDS)
+
+        return captcha
+
+    @classmethod
+    async def get(cls, captcha_id: str) -> Optional[Captcha]:
+        """
+        Get captcha object
+
+        Args:
+            captcha_id: Captcha ID
+
+        Returns:
+            Optional[Captcha]: Captcha object, or None if it doesn"t exist
+        """
+        captcha_data = await RedisManager.get(captcha_id)
+        if captcha_data:
+            return Captcha.from_dict(captcha_data)
+        return None
+
+    @classmethod
+    async def verify(cls, captcha_id: str, clicks: List[Dict[str, int]]) -> bool:
+        """
+        验证用户点击是否正确
+
+        参数:
+            captcha_id: 验证码ID
+            clicks: 用户点击坐标序列 [{x, y}, {x, y}, ...]
+
+        返回:
+            bool: 是否验证通过
+        """
+        captcha = await cls.get(captcha_id)
+
+        # 验证码不存在
+        if not captcha:
+            logger.warning(f"验证失败: 验证码ID不存在 - {captcha_id}")
+            return False
+
+        # 点击次数与目标数量不符
+        if len(clicks) != len(captcha.targets):
+            logger.info(f"验证失败: 点击次数({len(clicks)})与目标数量({len(captcha.targets)})不符 - {captcha_id}")
+            await RedisManager.delete(captcha_id)
+            return False
+
+        # 验证点击
+        is_valid = captcha.verify_clicks(clicks, settings.CLICK_TOLERANCE)
+
+        # 无论验证结果如何，都删除验证码以防止重复尝试
+        await RedisManager.delete(captcha_id)
+
+        if is_valid:
+            logger.info(f"验证成功: {captcha_id}")
+        else:
+            logger.info(f"验证失败: 点击位置错误 - {captcha_id}")
+
+        return is_valid
