@@ -32,7 +32,7 @@ A click-based CAPTCHA generation and verification system implemented with FastAP
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/click_captcha.git
+git clone https://github.com/velctmo/click_captcha.git
 cd click_captcha
 
 # Install dependencies
@@ -43,7 +43,7 @@ poetry install
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/click_captcha.git
+git clone https://github.com/velctmo/click_captcha.git
 cd click_captcha
 
 # Install Poetry if not already installed
@@ -153,7 +153,7 @@ Compared to file storage, using Redis to store base64 encoded image data has the
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/click_captcha.git
+git clone https://github.com/velctmo/click_captcha.git
 cd click_captcha
 
 # 安装依赖
@@ -164,7 +164,7 @@ poetry install
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/click_captcha.git
+git clone https://github.com/velctmo/click_captcha.git
 cd click_captcha
 
 # 安装Poetry（如果尚未安装）
